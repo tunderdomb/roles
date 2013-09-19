@@ -84,6 +84,50 @@
     }
   }
 
+  /* ======================
+   * EventStation
+   * ====================== */
+  function EventStation(){}
+  EventStation.prototype = {
+    on: function ( event, listener ){
+      this.events = this.events || {}
+      if ( typeof event != "string" ) {
+        var e
+        if ( event.length ) while ( e = event.shift() ) {
+          this.on(e, listener)
+        }
+        return
+      }
+      this.events[event] = this.events[event] || []
+      if ( !~this.events[event].indexOf(listener) )
+        this.events[event].push(listener)
+    },
+    off: function ( event, listener ){
+      var i
+      if ( !this.events || !this.events[event] ) return
+      i = this.events[event].indexOf(listener)
+      if ( !~i ) return
+      this.events[event].splice(i, 1)
+    },
+    broadcast: function ( event, message ){
+      if ( !this.events || !this.events[event] ) return
+      var i = -1
+        , events = this.events[event]
+        , l
+        , remove
+      message = [].slice.call(arguments, 1)
+      while ( ++i < events.length ) {
+        l = events.length
+        remove = events[i].apply(undefined, message) === false
+        if ( remove ) {
+          if ( l == events.length ) events.splice(i--, 1)
+          else --i
+        }
+        else if ( l != events.length ) --i
+      }
+    }
+  }
+
   /*
    * ROLE FUNCTIONS
    * */
@@ -194,7 +238,7 @@
     delete setup.add
     delete setup.name
     delete setup.defaults
-    role.prototype = setup
+    role.prototype = extend(setup, EventStation.prototype)
   }
 
   /**
@@ -229,7 +273,7 @@
       return false
     }
     options = options || findOptions(el, roleName)
-//    debugger;
+    //    debugger;
     removeRole(el, roleName)
     return roles[roleName](el, options)
   }
@@ -280,6 +324,9 @@
   roles.select = function( el ){
     el.setAttribute(roles.attr.selected, true)
   }
+  roles.isSelected = function( el ){
+    return el.hasAttribute(roles.attr.selected)
+  }
   roles.deselect = function( el ){
     el.removeAttribute(roles.attr.selected)
   }
@@ -318,186 +365,3 @@
 
   host.roles = roles
 }(window, window.document, this);
-/*
- * The following roles act as standalone user interface widgets
- * or as part of larger, compostabsete widgets.
-
- alert
- alertdialog
- button
- checkbox
- dialog
- gridcell
- link
- log
- marquee
- menutabsetem
- menutabsetemcheckbox
- menutabsetemradio
- option
- progressbar
- radio
- scrollbar
- slider
- spinbutton
- status
- tab
- tabpanel
- textbox
- timer
- tooltip
- treetabsetem
- * */
-!function( win, doc, roles ){
-
-  /*
-   * tabset
-   * natives: tablist, tab, tabpanel
-   * customs: tabpool, addtab, closetab
-   * defaults:
-   * ...
-   * abstracts:
-   * ...
-   * */
-  roles.create({
-    name: "tabset",
-    defaults: {
-      closable: false,
-      onselect: null,
-      onclose: null
-    },
-    add: function Tabset( el, options ){
-      var i = -1
-        , content, activeContent
-        , tab, activeTab, tabs
-        , tabset = this
-        , content
-
-      roles.extend(this, options)
-      this.bar = roles.getRole(el, "tablist")
-      if ( !this.bar ) return
-      this.tabs = this.tabs || roles.findRoles(this.bar, "tab")
-      tabs = this.tabs = [].slice.call(this.tabs)
-      this.add = this.add || roles.getRole(this.bar, "addtab")
-      this.pool = roles.getRole(el, "tabpool") || el
-      this.contents = this.contents || roles.findRoles(this.pool, "tabpanel")
-      if ( this.tabs.length && this.tabs.length != this.contents.length ) {
-        console.error("Tab headers and content boxes differ in number")
-        return
-      }
-      while ( tab = tabs[++i] ) {
-        content = this.contents[i]
-        if ( tab.hasAttribute(roles.attr.selected) ) {
-          activeTab = tab
-          activeContent = content
-        }
-/*        if ( content && !content.hasAttribute(roles.attr.hidden) ) {
-          activeContent = content
-//          activeTab = tab
-        }*/
-        this.addTab(tab, content)
-      }
-      this.activeTab = activeTab
-      this.activeContent = activeContent
-      if ( !activeTab ) {
-        this.changeTo(0)
-      }
-      if ( this.add ) {
-        roles.addListener(this.add, "click", function(){
-          tabset.addTab()
-        })
-      }
-      this.ready = true
-    },
-    createTab: function(){
-    },
-    createContent: function(){
-    },
-    createClose: function(){
-    },
-    addTab: function( tab, content ){
-      var close
-        , tabset = this
-
-      if( this.ready && this.create ){
-        tab = this.create.apply(this, arguments)
-        if( !tab ) return
-        content = tab[1]
-        tab = tab[0]
-      }
-
-      tab = tab || this.createTab.apply(this, arguments)
-      content = content || this.createContent.apply(this, arguments)
-      if ( !content || !tab ) return
-
-      if ( !~this.tabs.indexOf(tab) ) {
-        this.tabs.push(tab)
-        this.add
-          ? this.bar.insertBefore(tab, this.add)
-          : this.bar.appendChild(tab)
-      }
-
-      if ( !~this.contents.indexOf(content) ) {
-        this.contents.push(content)
-        this.pool.appendChild(content)
-      }
-
-      roles.addListener(tab, "click", function(){
-        tabset.changeTo(tab)
-      })
-
-      if ( this.closable ) {
-        close = roles.getRole(tab, "closetab")
-        if ( !close ) {
-          close = this.createClose.apply(this, arguments)
-          if ( !close ) return
-          tab.appendChild(close)
-        }
-        roles.addListener(close, "click", function(){
-          if ( !tabset.onclose || tabset.onclose.call(this, tab, content) ) {
-            tab.parentNode.removeChild(tab)
-            content.parentNode.removeChild(content)
-          }
-        })
-      }
-      this.ready && this.changeTo(tab)
-      if( this.focusElement ){
-        this.focusElement.focus()
-        delete this.focusElement
-      }
-    },
-    changeTo: function( index ){
-      var tab, content
-      if ( index instanceof Node ) {
-        index = this.tabs.indexOf(index)
-      }
-      if ( ~index && this.tabs[index] ) {
-        tab = this.tabs[index]
-        content = this.contents[index]
-        if ( this.activeTab ) {
-          roles.deselect(this.activeTab)
-        }
-        if ( this.activeContent ) {
-          roles.hide(this.activeContent)
-        }
-        this.activeTab = tab
-        this.activeContent = content
-        roles.select(this.activeTab)
-        roles.show(this.activeContent)
-        this.onselect && this.onselect(tab, content)
-      }
-    },
-    closeTab: function( index ){
-      var i
-      if ( index instanceof Node ) {
-        i = this.tabs.indexOf(index)
-        if ( !~i ) i = this.contents.indexOf(index)
-      }
-      if ( ~i && this.tabs[i] ) {
-        this.tabs[i].parentNode.removeChild(this.tabs[i])
-        this.contents[i].parentNode.removeChild(this.contents[i])
-      }
-    }
-  })
-
-}(window, document, window.roles);
